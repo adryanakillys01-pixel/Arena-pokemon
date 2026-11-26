@@ -49,6 +49,8 @@ def load_catalog():
             p.update(DEX[name])
         DEX[name]=p
     for n,m in data['moves'].items():MOVES.setdefault(n,m)
+    for n,m in MOVES.items():m['pp']=data.get('movePP',{}).get(n,10)
+    MOVES.setdefault('Debater-se',dict(type='Normal',cat='F',power=50,acc=100,effect='recoil4',priority=0,pp=1))
     print(f"Pokédex: {data['speciesCount']} espécies, {len(DEX)} entradas, {len(MOVES)} golpes",flush=True)
     return data['speciesCount']
 SPECIES_COUNT=load_catalog()
@@ -65,13 +67,24 @@ except (OSError,ValueError): pass
 def save():
     tmp=STORE.with_suffix('.tmp');tmp.write_text(json.dumps(ROOMS,ensure_ascii=False));tmp.replace(STORE)
 def chance(n):return R.random()*100<n
+def maxpp(n):return MOVES[n].get('pp',10)
+def pp_for(p):return p.setdefault('pp',{n:maxpp(n) for n in p['moves']})
+def legal_moves(p):
+    usable=[n for n in p['moves'] if pp_for(p).get(n,0)>0]
+    return usable or ['Debater-se']
 def fighter(n):
-    p=copy.deepcopy(DEX[n]);p.update(hp=p['stats'][0],status='',sleep=0,st=[0]*6,seed=False,age=0,last='',encore=0,destiny=False,flash=False,roost=False,protect=False,transformed=None);return p
+    p=copy.deepcopy(DEX[n]);p.update(pp={n:maxpp(n) for n in p['moves']},hp=p['stats'][0],status='',sleep=0,st=[0]*6,seed=False,age=0,last='',encore=0,destiny=False,flash=False,roost=False,protect=False,transformed=None);return p
 def active(r,i):return r['players'][i]['team'][r['players'][i]['active']]
 def living(r,i):return [j for j,p in enumerate(r['players'][i]['team']) if p['hp']>0]
 def log(r,s):r['log'].append(s);r['log']=r['log'][-100:]
-def stat(p,j):
-    s=p['st'][j-1];v=p['stats'][j]*(2+s)/2 if s>=0 else p['stats'][j]*2/(2-s);return max(1,int(v*(.5 if j==5 and p['status']=='Paralisado' else 1)))
+def stat(p,j,critical=False,defending=False):
+    s=p['st'][j-1]
+    if critical:s=min(s,0) if defending else max(s,0)
+    v=p['stats'][j]*(2+s)/2 if s>=0 else p['stats'][j]*2/(2-s)
+    if j==1 and p['ability'] in ('Huge Power','Pure Power'):v*=2
+    if j==5 and p['status']=='Paralisado' and p['ability']!='Quick Feet':v*=.5
+    if j==5 and p['status'] and p['ability']=='Quick Feet':v*=1.5
+    return max(1,int(v))
 def heal(p,n):p['hp']=min(p['stats'][0],p['hp']+n)
 def hurt(p,n):d=min(p['hp'],max(0,n));p['hp']-=d;return d
 def stage(r,p,j,n,other=None):
@@ -79,6 +92,7 @@ def stage(r,p,j,n,other=None):
     old=p['st'][j];p['st'][j]=max(-6,min(6,old+n));log(r,f"{p['name']}: atributo {'↑' if n>0 else '↓'} {abs(p['st'][j]-old)}.")
     if n<0 and other and p['ability']=='Competitive':stage(r,p,2,2)
 def status(r,p,s):
+    if (s=='Dormindo' and p['ability'] in ('Insomnia','Vital Spirit')) or (s=='Queimado' and p['ability']=='Water Veil') or (s=='Paralisado' and p['ability']=='Limber') or (s=='Envenenado' and p['ability']=='Immunity') or (s=='Congelado' and p['ability']=='Magma Armor'):return False
     if p['status'] or (s=='Queimado' and 'Fogo' in p['types']) or (s=='Paralisado' and 'Elétrico' in p['types']) or (s=='Congelado' and 'Gelo' in p['types']) or (s=='Envenenado' and any(t in p['types'] for t in ['Aço','Veneno'])):return False
     p['status']=s;p['sleep']=R.randint(1,3) if s=='Dormindo' else 0;log(r,f"{p['name']} está {s.lower()}!");return True
 def enter(r,i,j):
@@ -104,7 +118,10 @@ def attack(r,i,name,received,flinched):
     if p['status']=='Congelado':
         if chance(20) or name=='Investida Flamejante':p['status']=''
         else:log(r,f"{p['name']} está congelado!");return
-    if p['encore'] and p['last']:name=p['last']
+    if p['encore'] and p['last'] in legal_moves(p):name=p['last']
+    if name not in legal_moves(p):name=legal_moves(p)[0]
+    pp=pp_for(p)
+    if name in pp:pp[name]=max(0,pp[name]-1-(1 if q['ability']=='Pressure' else 0))
     p['destiny']=False;v=MOVES[name];e=v['effect'];t=v['type'];cat=v['cat'];log(r,f"{p['name']} usa {name}!");previous=p['last'];p['last']=name
     if e=='fakeout' and p['age']>0:log(r,'Falhou: somente no primeiro turno em campo.');return
     if not chance(int(v['acc']*(3+max(0,p['st'][5]))/(3+max(0,-p['st'][5])))):log(r,'Errou!');return
@@ -118,8 +135,8 @@ def attack(r,i,name,received,flinched):
         elif e=='transform':
             if p.get('transformed') or q.get('transformed'):log(r,'Transformação falhou.')
             else:
-                p['transformed']={k:copy.deepcopy(p[k]) for k in ['types','stats','ability','moves']}
-                p.update(types=copy.deepcopy(q['types']),stats=[p['stats'][0]]+q['stats'][1:],ability=q['ability'],moves=copy.deepcopy(q['moves']),st=copy.deepcopy(q['st']))
+                p['transformed']={k:copy.deepcopy(p[k]) for k in ['types','stats','ability','moves','pp']}
+                p.update(types=copy.deepcopy(q['types']),stats=[p['stats'][0]]+q['stats'][1:],ability=q['ability'],moves=copy.deepcopy(q['moves']),pp={n:5 for n in q['moves']},st=copy.deepcopy(q['st']))
                 log(r,f"{p['name']} se transformou em {q['name']}!")
         elif e=='atk2':stage(r,p,0,2)
         elif e=='def3':stage(r,p,1,3)
@@ -141,21 +158,31 @@ def attack(r,i,name,received,flinched):
     ignore=p['ability']=='Mold Breaker' or name=='Raio Espectral'
     if not ignore and q['ability']=='Flash Fire' and t=='Fogo':q['flash']=True;mult=0
     if not ignore and q['ability']=='Sap Sipper' and t=='Planta':stage(r,q,0,1);mult=0
+    if not ignore and q['ability']=='Levitate' and t=='Terra':mult=0
+    if not ignore and ((q['ability'] in ('Water Absorb','Dry Skin') and t=='Água') or (q['ability']=='Volt Absorb' and t=='Elétrico')):
+        heal(q,q['stats'][0]//4);log(r,f"{q['name']} absorveu o golpe e recuperou HP!");return
+    if not ignore and q['ability']=='Lightning Rod' and t=='Elétrico':stage(r,q,2,1);mult=0
+    if not ignore and q['ability']=='Storm Drain' and t=='Água':stage(r,q,2,1);mult=0
+    if not ignore and q['ability']=='Motor Drive' and t=='Elétrico':stage(r,q,4,1);mult=0
     if not mult:log(r,'Imune!');return
     if e in ('counter','mirror'):
         rec=received.get(i,(0,''));d=2*rec[0] if rec[1]==cat else 0
         if not d:log(r,'Falhou.');return
     else:
         power=v['power'];power*=1.5 if p['ability']=='Technician' and power<=60 else 1
-        if p['hp']<=p['stats'][0]//3 and ((p['ability']=='Blaze' and t=='Fogo') or (p['ability']=='Overgrow' and t=='Planta')):power*=1.5
+        if p['hp']<=p['stats'][0]//3 and ((p['ability']=='Blaze' and t=='Fogo') or (p['ability']=='Overgrow' and t=='Planta') or (p['ability']=='Torrent' and t=='Água') or (p['ability']=='Swarm' and t=='Inseto')):power*=1.5
         if p['flash'] and t=='Fogo':power*=1.5
         secondary=e in ('burn10','para10','poison30','freeze10','sd10','sd20','flinch30','flinch20','acc30','def20','def30','atkdown10','sadown30','flare')
         sheer=p['ability']=='Sheer Force' and secondary
         if sheer:power*=1.3
-        crit=chance(12.5 if e=='highcrit' else 100/24) and (ignore or q['ability']!='Battle Armor');roll=R.randint(85,100)
-        a=stat(p,2 if e=='body' else 1 if cat=='F' else 3);b=stat(q,2 if cat=='F' else 4)
-        d=(int(22*power*a/b/50)+2)*roll/100*(1.5 if crit else 1)*(1.5 if t in p['types'] else 1)*mult
-        if cat=='F' and p['status']=='Queimado':d*=.5
+        crit=chance(12.5 if e=='highcrit' else 100/24) and (ignore or q['ability'] not in ('Battle Armor','Shell Armor'));roll=R.randint(85,100)
+        a=stat(p,2 if e=='body' else 1 if cat=='F' else 3,crit);b=stat(q,2 if cat=='F' else 4,crit,True)
+        if p['ability']=='Guts' and p['status'] and cat=='F':a=int(a*1.5)
+        d=(int(22*power*a/b/50)+2)*roll/100*(1.5 if crit else 1)*((2 if p['ability']=='Adaptability' else 1.5) if t in p['types'] and name!='Debater-se' else 1)*mult
+        if cat=='F' and p['status']=='Queimado' and p['ability']!='Guts':d*=.5
+        if not ignore and q['ability']=='Thick Fat' and t in ('Fogo','Gelo'):d*=.5
+        if not ignore and q['ability'] in ('Filter','Solid Rock','Prism Armor') and mult>1:d*=.75
+        if not ignore and q['ability']=='Multiscale' and q['hp']==q['stats'][0]:d*=.5
         contact=cat=='F' and name not in ('Terremoto','Deslizamento de Rochas','Bumerangue de Osso')
         if not ignore and q['ability']=='Fluffy':d*= (2 if t=='Fogo' else 1)*(.5 if contact else 1)
         if q['ability']=='Shadow Shield' and q['hp']==q['stats'][0]:d*=.5
@@ -165,6 +192,7 @@ def attack(r,i,name,received,flinched):
         if mult!=1:log(r,f'Efetividade: {mult}×.')
         if sheer:e='' if e!='flare' else 'recoil3'
         if contact and q['ability']=='Static' and chance(30):status(r,p,'Paralisado')
+    if not ignore and q['ability']=='Sturdy' and q['hp']==q['stats'][0] and d>=q['hp'] and e!='twice':d=q['hp']-1;log(r,f"{q['name']} resistiu com Sturdy!")
     actual=hurt(q,d);received[1-i]=(actual,cat);log(r,f"{q['name']} perdeu {actual} HP (dano calculado: {d}).")
     if e in ('drain','drain75'):heal(p,max(1,int(actual*(.75 if e=='drain75' else .5))))
     if name=='Debater-se':log(r,f"{p['name']} sofre {hurt(p,max(1,p['stats'][0]//4))} HP de recuo.")
@@ -182,8 +210,14 @@ def attack(r,i,name,received,flinched):
     if e=='pivot':
         options=[j for j in living(r,i) if j!=r['players'][i]['active']]
         if options and p['hp']:enter(r,i,options[0]);active(r,i)['age']=-1
+def frame_state(r):
+    return [dict(active=r['players'][i]['active'],name=active(r,i)['name'],hp=active(r,i)['hp'],maxHp=active(r,i)['stats'][0],status=active(r,i)['status'],id=active(r,i)['id']) for i in range(2)]
 def resolve(r):
     acts=r['actions'];received={};flinched=set();log(r,f"— Turno {r['turn']} —")
+    replay=dict(id=secrets.token_hex(8),turn=r['turn'],frames=[])
+    r['replay']=replay
+    def frame(i,kind,move,before,lines):
+        replay['frames'].append(dict(actor=i,kind=kind,move=move,before=before,after=frame_state(r),lines=lines))
     def priority(i):
         a=acts[i];p=active(r,i)
         if a['kind']=='switch':return 10
@@ -192,16 +226,23 @@ def resolve(r):
     for i in order:
         if not active(r,i)['hp'] or not active(r,1-i)['hp']:continue
         a=acts[i]
+        before=frame_state(r);oldlog=list(r['log'])
         if a['kind']=='switch':enter(r,i,a['target']);active(r,i)['age']=-1
         else:attack(r,i,a['move'],received,flinched)
-        if finish(r):break
+        ended=finish(r)
+        count=next((k for k in range(min(len(oldlog),len(r['log'])), -1,-1) if oldlog[len(oldlog)-k:]==r['log'][:k]),0)
+        frame(i,a['kind'],a.get('move'),before,r['log'][count:])
+        if ended:break
     if r['phase']!='end':
+        before=frame_state(r);oldlog=list(r['log'])
         for i in range(2):
             p=active(r,i);p['roost']=False;p['protect']=False;p['age']+=1;p['encore']=max(0,p['encore']-1)
             if p['hp'] and p['ability']!='Magic Guard':
                 if p['status'] in ('Queimado','Envenenado'):log(r,f"{p['name']} perde {hurt(p,max(1,p['stats'][0]//(16 if p['status']=='Queimado' else 8)))} HP por {p['status'].lower()}.")
                 if p['hp'] and p['seed']:heal(active(r,1-i),hurt(p,max(1,p['stats'][0]//8)))
         if not finish(r):r['turn']+=1;r['phase']='replace' if any(not active(r,i)['hp'] for i in range(2)) else 'battle'
+        count=next((k for k in range(min(len(oldlog),len(r['log'])), -1,-1) if oldlog[len(oldlog)-k:]==r['log'][:k]),0)
+        if r['log'][count:] or before!=frame_state(r):frame(-1,'residual',None,before,r['log'][count:])
     r['actions']=[None,None]
 def switch_allowed(r,i):
     p,q=active(r,i),active(r,1-i);return not(q['ability']=='Shadow Tag' and p['ability']!='Shadow Tag' and 'Fantasma' not in p['types'])
@@ -211,6 +252,12 @@ def snapshot(r,i):
         if p is None:out['players'].append(None);continue
         visible=j==i or r['phase'] not in ('lobby','teams')
         out['players'].append(dict(name=p['name'],team=p['team'] if visible else [],active=p['active'],selected=bool(p['team'])))
+    out['replay']=copy.deepcopy(r.get('replay'))
+    if r['players'][i]['team']:
+        own=out['players'][i]['team'];
+        for p in own:pp_for(p)
+        out['legalMoves']=legal_moves(active(r,i))
+    else:out['legalMoves']=[]
     out['canSwitch']=r['phase']=='battle' and switch_allowed(r,i) if all(r['players']) and all(p['team'] for p in r['players']) else False
     return out
 class Bad(Exception):pass
@@ -236,7 +283,7 @@ def handle(d):
     elif op=='action':
         require(r['phase']=='battle' and d.get('turn')==r['turn'] and r['actions'][i] is None,'Turno desatualizado ou já confirmado.');a=d.get('action',{});kind=a.get('kind')
         if kind=='switch':require(switch_allowed(r,i) and type(a.get('target')) is int and a['target'] in living(r,i) and a['target']!=p['active'],'Troca inválida.')
-        else:require(kind=='move' and a.get('move') in active(r,i)['moves'],'Golpe inválido.')
+        else:require(kind=='move' and a.get('move') in legal_moves(active(r,i)),'Golpe inválido.')
         r['actions'][i]=a
         if all(r['actions']):resolve(r)
     elif op=='replace':
@@ -246,19 +293,21 @@ def handle(d):
         require(r['phase']=='end','Partida ainda em andamento.');r['actions'][i]={'ready':True}
         if all(r['actions']):
             for x in r['players']:x.update(team=[],active=0)
-            r.update(phase='teams',turn=1,winner=None,actions=[None,None],log=[])
+            r.update(phase='teams',turn=1,winner=None,actions=[None,None],log=[],replay=None)
     else:raise Bad('Ação desconhecida.')
     save();return dict(state=snapshot(r,i))
 class HTTP(BaseHTTPRequestHandler):
     def send(self,b,typ='application/json',status=200):
         if not isinstance(b,bytes):b=json.dumps(b,ensure_ascii=False).encode()
-        self.send_response(status);self.send_header('Content-Type',typ);self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
+        self.send_response(status);self.send_header('Content-Type',typ);self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(b)));self.end_headers();
+        if self.command!='HEAD':self.wfile.write(b)
     def do_GET(self):
         path=urlsplit(self.path).path.rstrip('/') or '/'
         if path in ('/', '/index.html'):self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
         elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES,speciesCount=SPECIES_COUNT))
         elif path=='/favicon.ico':self.send(b'', 'image/x-icon', 204)
         else:self.send({'error':'Não encontrado'},status=404)
+    def do_HEAD(self):self.do_GET()
     def do_POST(self):
         try:
             require(urlsplit(self.path).path.rstrip('/')=='/api','Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
