@@ -35,6 +35,23 @@ def m(n,t,c,p=0,a=100,e='',pr=0): MOVES[n]=dict(type=t,cat=c,power=p,acc=a,effec
 for n,t,c,p,a,e,pr in [
 ('Asa da Oblivion','Voador','E',80,100,'drain75',0),('Terremoto','Terra','F',100,100,'',0),('Deslizamento de Rochas','Pedra','F',75,90,'flinch30',0),('Investida Dupla','Normal','F',120,100,'recoil3',0),('Dança das Espadas','Normal','S',0,100,'atk2',0),('Bumerangue de Osso','Terra','F',50,90,'twice',0),('Soco de Fogo','Fogo','F',75,100,'burn10',0),('Soco de Trovão','Elétrico','F',75,100,'para10',0),('Cabeçada','Normal','F',70,100,'flinch30',0),('Chute Duplo','Lutador','F',30,100,'twice',0),('Guarda de Algodão','Planta','S',0,100,'def3',0),('Descanso','Psíquico','S',0,100,'rest',0),('Lança-chamas','Fogo','E',90,100,'burn10',0),('Pulso do Dragão','Dragão','E',85,100,'',0),('Corte','Normal','F',70,100,'highcrit',0),('Fogo-fátuo','Fogo','S',0,85,'burn',0),('Giga Dreno','Planta','E',75,100,'drain',0),('Bomba de Lodo','Veneno','E',90,100,'poison30',0),('Pó do Sono','Planta','S',0,75,'sleep',0),('Semente Sanguessuga','Planta','S',0,90,'seed',0),('Hipervoz','Normal','E',90,100,'',0),('Brilho Deslumbrante','Fada','E',80,100,'',0),('Cantar','Normal','S',0,55,'sleep',0),('Onda de Trovão','Elétrico','S',0,90,'para',0),('Surf','Água','E',90,100,'',0),('Raio de Gelo','Gelo','E',90,100,'freeze10',0),('Psíquico','Psíquico','E',90,100,'sd10',0),('Mente Calma','Psíquico','S',0,100,'calm',0),('Martelo de Madeira','Planta','F',120,100,'recoil3',0),('Síntese','Planta','S',0,100,'heal',0),('Investida Flamejante','Fogo','F',120,100,'flare',0),('Ataque Rápido','Normal','F',40,100,'',1),('Mordida','Sombrio','F',60,100,'flinch30',0),('Pássaro Bravo','Voador','F',120,100,'recoil3',0),('Cabeça de Ferro','Aço','F',80,100,'flinch30',0),('Pressão Corporal','Lutador','F',80,100,'body',0),('Roost','Voador','S',0,100,'roost',0),('U-turn','Inseto','F',70,100,'pivot',0),('Ataque Surpresa','Normal','F',40,100,'fakeout',3),('Jogo Duro','Fada','F',90,90,'atkdown10',0),('Thunderbolt','Elétrico','E',90,100,'para10',0),('Soco de Gelo','Gelo','F',75,100,'freeze10',0),('Quebra-tijolos','Lutador','F',75,100,'',0),('Garra do Dragão','Dragão','F',80,100,'',0),('Golpe Venenoso','Veneno','F',80,100,'poison30',0),('Dança do Dragão','Dragão','S',0,100,'dance',0),('Água Lamacenta','Água','E',90,85,'acc30',0),('Contra-ataque','Lutador','F',0,100,'counter',-5),('Espelho Refletor','Psíquico','E',0,100,'mirror',-5),('Encore','Normal','S',0,100,'encore',0),('Laço do Destino','Fantasma','S',0,100,'destiny',0),('Bola Sombria','Fantasma','E',80,100,'sd20',0),('Explosão Focal','Lutador','E',120,70,'sd10',0),('Recuperação','Normal','S',0,100,'heal',0),('Carga Selvagem','Elétrico','F',90,100,'recoil4',0),('Triturar','Sombrio','F',80,100,'def20',0),('Presa de Gelo','Gelo','F',65,95,'freeze10',0),('Cauda de Ferro','Aço','F',100,75,'def30',0),('Nó de Grama','Planta','E',80,100,'',0),('Poder da Terra','Terra','E',90,100,'sd10',0),('Raio Espectral','Fantasma','E',100,100,'',0),('Explosão Lunar','Fada','E',95,100,'sadown30',0),('Pulso Sombrio','Sombrio','E',80,100,'flinch20',0)]: m(n,t,c,p,a,e,pr)
 DEX={n:dict(name=n,id=i,types=t.split('/'),stats=[s[0]+75]+[x+20 for x in s[1:]],ability=ab,moves=ms.split('|')) for n,i,t,s,ab,ms in RAW}
+# Load complete PokéAPI catalog (generated during startup if not packaged).
+def load_catalog():
+    path=ROOT/'catalog.json'
+    if not path.exists():
+        from build_catalog import main
+        main()
+    data=json.loads(path.read_text(encoding='utf-8'))
+    if data['speciesCount']<1000:raise RuntimeError('Catálogo incompleto')
+    for name,p in data['dex'].items():
+        if p['ability']=='Intimidate':p['ability']='Intimidação'
+        if name in DEX:
+            p.update(DEX[name])
+        DEX[name]=p
+    for n,m in data['moves'].items():MOVES.setdefault(n,m)
+    print(f"Pokédex: {data['speciesCount']} espécies, {len(DEX)} entradas, {len(MOVES)} golpes",flush=True)
+    return data['speciesCount']
+SPECIES_COUNT=load_catalog()
 # attacker: super effective, resisted, immune
 TYPES={
 'Normal':('', 'Pedra Aço','Fantasma'),'Fogo':('Planta Gelo Inseto Aço','Fogo Água Pedra Dragão',''),'Água':('Fogo Terra Pedra','Água Planta Dragão',''),'Elétrico':('Água Voador','Elétrico Planta Dragão','Terra'),'Planta':('Água Terra Pedra','Fogo Planta Veneno Voador Inseto Dragão Aço',''),'Gelo':('Planta Terra Voador Dragão','Fogo Água Gelo Aço',''),'Lutador':('Normal Gelo Pedra Sombrio Aço','Veneno Voador Psíquico Inseto Fada','Fantasma'),'Veneno':('Planta Fada','Veneno Terra Pedra Fantasma','Aço'),'Terra':('Fogo Elétrico Veneno Pedra Aço','Planta Inseto','Voador'),'Voador':('Planta Lutador Inseto','Elétrico Pedra Aço',''),'Psíquico':('Lutador Veneno','Psíquico Aço','Sombrio'),'Inseto':('Planta Psíquico Sombrio','Fogo Lutador Veneno Voador Fantasma Aço Fada',''),'Pedra':('Fogo Gelo Voador Inseto','Lutador Terra Aço',''),'Fantasma':('Psíquico Fantasma','Sombrio','Normal'),'Dragão':('Dragão','Aço','Fada'),'Sombrio':('Psíquico Fantasma','Lutador Sombrio Fada',''),'Aço':('Gelo Pedra Fada','Fogo Água Elétrico Aço',''),'Fada':('Lutador Dragão Sombrio','Fogo Veneno Aço','')}
@@ -49,7 +66,7 @@ def save():
     tmp=STORE.with_suffix('.tmp');tmp.write_text(json.dumps(ROOMS,ensure_ascii=False));tmp.replace(STORE)
 def chance(n):return R.random()*100<n
 def fighter(n):
-    p=copy.deepcopy(DEX[n]);p.update(hp=p['stats'][0],status='',sleep=0,st=[0]*6,seed=False,age=0,last='',encore=0,destiny=False,flash=False,roost=False);return p
+    p=copy.deepcopy(DEX[n]);p.update(hp=p['stats'][0],status='',sleep=0,st=[0]*6,seed=False,age=0,last='',encore=0,destiny=False,flash=False,roost=False,protect=False,transformed=None);return p
 def active(r,i):return r['players'][i]['team'][r['players'][i]['active']]
 def living(r,i):return [j for j,p in enumerate(r['players'][i]['team']) if p['hp']>0]
 def log(r,s):r['log'].append(s);r['log']=r['log'][-100:]
@@ -65,7 +82,9 @@ def status(r,p,s):
     if p['status'] or (s=='Queimado' and 'Fogo' in p['types']) or (s=='Paralisado' and 'Elétrico' in p['types']) or (s=='Congelado' and 'Gelo' in p['types']) or (s=='Envenenado' and any(t in p['types'] for t in ['Aço','Veneno'])):return False
     p['status']=s;p['sleep']=R.randint(1,3) if s=='Dormindo' else 0;log(r,f"{p['name']} está {s.lower()}!");return True
 def enter(r,i,j):
-    old=active(r,i);old.update(st=[0]*6,seed=False,encore=0,destiny=False,roost=False,flash=False);r['players'][i]['active']=j;p=active(r,i);p['age']=0;log(r,f"{r['players'][i]['name']} envia {p['name']}!")
+    old=active(r,i);original=old.get('transformed');
+    if original:old.update(original);old['transformed']=None
+    old.update(st=[0]*6,seed=False,encore=0,destiny=False,roost=False,flash=False,protect=False);r['players'][i]['active']=j;p=active(r,i);p['age']=0;log(r,f"{r['players'][i]['name']} envia {p['name']}!")
     if p['ability']=='Intimidação' and living(r,1-i):stage(r,active(r,1-i),0,-1,p)
 def finish(r):
     alive=[bool(living(r,i)) for i in range(2)]
@@ -89,8 +108,20 @@ def attack(r,i,name,received,flinched):
     p['destiny']=False;v=MOVES[name];e=v['effect'];t=v['type'];cat=v['cat'];log(r,f"{p['name']} usa {name}!");previous=p['last'];p['last']=name
     if e=='fakeout' and p['age']>0:log(r,'Falhou: somente no primeiro turno em campo.');return
     if not chance(int(v['acc']*(3+max(0,p['st'][5]))/(3+max(0,-p['st'][5])))):log(r,'Errou!');return
+    if q.get('protect') and (cat!='S' or e in ('sleep','burn','para','seed','encore','transform')):log(r,f"{q['name']} se protegeu!");return
     if cat=='S':
-        if e=='atk2':stage(r,p,0,2)
+        if e=='protect':
+            if previous==name and not chance(33):log(r,'Proteção falhou.')
+            else:p['protect']=True;log(r,'Proteção ativada.')
+        elif e=='splash':log(r,'Nada aconteceu.')
+        elif e=='def1':stage(r,p,1,1)
+        elif e=='transform':
+            if p.get('transformed') or q.get('transformed'):log(r,'Transformação falhou.')
+            else:
+                p['transformed']={k:copy.deepcopy(p[k]) for k in ['types','stats','ability','moves']}
+                p.update(types=copy.deepcopy(q['types']),stats=[p['stats'][0]]+q['stats'][1:],ability=q['ability'],moves=copy.deepcopy(q['moves']),st=copy.deepcopy(q['st']))
+                log(r,f"{p['name']} se transformou em {q['name']}!")
+        elif e=='atk2':stage(r,p,0,2)
         elif e=='def3':stage(r,p,1,3)
         elif e=='dance':stage(r,p,0,1);stage(r,p,4,1)
         elif e=='calm':stage(r,p,2,1);stage(r,p,3,1)
@@ -106,6 +137,7 @@ def attack(r,i,name,received,flinched):
             elif not status(r,q,{'sleep':'Dormindo','burn':'Queimado','para':'Paralisado'}[e]):log(r,'Falhou.')
         return
     types=[x for x in q['types'] if not(q['roost'] and x=='Voador')]; mult=eff(t,types)
+    if name=='Debater-se':mult=1
     ignore=p['ability']=='Mold Breaker' or name=='Raio Espectral'
     if not ignore and q['ability']=='Flash Fire' and t=='Fogo':q['flash']=True;mult=0
     if not ignore and q['ability']=='Sap Sipper' and t=='Planta':stage(r,q,0,1);mult=0
@@ -135,7 +167,8 @@ def attack(r,i,name,received,flinched):
         if contact and q['ability']=='Static' and chance(30):status(r,p,'Paralisado')
     actual=hurt(q,d);received[1-i]=(actual,cat);log(r,f"{q['name']} perdeu {actual} HP (dano calculado: {d}).")
     if e in ('drain','drain75'):heal(p,max(1,int(actual*(.75 if e=='drain75' else .5))))
-    if e in ('recoil3','recoil4','flare') and p['ability']!='Rock Head':log(r,f"{p['name']} sofre {hurt(p,max(1,round(actual/(4 if e=='recoil4' else 3))))} HP de recuo.")
+    if name=='Debater-se':log(r,f"{p['name']} sofre {hurt(p,max(1,p['stats'][0]//4))} HP de recuo.")
+    elif e in ('recoil3','recoil4','flare') and p['ability']!='Rock Head':log(r,f"{p['name']} sofre {hurt(p,max(1,round(actual/(4 if e=='recoil4' else 3))))} HP de recuo.")
     if q['hp']==0:
         log(r,f"{q['name']} foi derrotado!")
         if q['destiny']:hurt(p,p['hp']);log(r,'Laço do Destino ativado!')
@@ -164,7 +197,7 @@ def resolve(r):
         if finish(r):break
     if r['phase']!='end':
         for i in range(2):
-            p=active(r,i);p['roost']=False;p['age']+=1;p['encore']=max(0,p['encore']-1)
+            p=active(r,i);p['roost']=False;p['protect']=False;p['age']+=1;p['encore']=max(0,p['encore']-1)
             if p['hp'] and p['ability']!='Magic Guard':
                 if p['status'] in ('Queimado','Envenenado'):log(r,f"{p['name']} perde {hurt(p,max(1,p['stats'][0]//(16 if p['status']=='Queimado' else 8)))} HP por {p['status'].lower()}.")
                 if p['hp'] and p['seed']:heal(active(r,1-i),hurt(p,max(1,p['stats'][0]//8)))
@@ -194,8 +227,8 @@ def handle(d):
         require(r['players'][1] is None,'Sala já está cheia.');name=str(d.get('name','')).strip()[:24];require(name,'Informe seu nome.');token=secrets.token_urlsafe(24);r['players'][1]=dict(name=name,token=token,team=[],active=0);r['phase']='teams';save();return dict(token=token,state=snapshot(r,1))
     i=next((j for j,p in enumerate(r['players']) if p and p['token']==token),None);require(i is not None,'Sessão inválida.');p=r['players'][i]
     if op=='state':return dict(state=snapshot(r,i))
-    if op=='team':
-        names=d.get('team',[]);require(r['phase']=='teams' and not p['team'],'Não é possível alterar a equipe.');require(isinstance(names,list) and len(names)==3 and all(isinstance(n,str) and n in DEX for n in names) and len(set(names))==3,'Selecione três Pokémon diferentes.');p['team']=[fighter(n) for n in names];p['active']=0
+    if op in ('team','random_team'):
+        names=R.sample([n for n,x in DEX.items() if x.get('default',True)],3) if op=='random_team' else d.get('team',[]);require(r['phase']=='teams' and not p['team'],'Não é possível alterar a equipe.');require(isinstance(names,list) and len(names)==3 and all(isinstance(n,str) and n in DEX for n in names) and len(set(names))==3,'Selecione três Pokémon diferentes.');p['team']=[fighter(n) for n in names];p['active']=0
         if all(x['team'] for x in r['players']):r['phase']='battle';log(r,'A batalha começou!');
         if r['phase']=='battle':
             for j in range(2):
@@ -223,7 +256,7 @@ class HTTP(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlsplit(self.path).path.rstrip('/') or '/'
         if path in ('/', '/index.html'):self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
-        elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES))
+        elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES,speciesCount=SPECIES_COUNT))
         elif path=='/favicon.ico':self.send(b'', 'image/x-icon', 204)
         else:self.send({'error':'Não encontrado'},status=404)
     def do_POST(self):
