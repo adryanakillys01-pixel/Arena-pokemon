@@ -316,5 +316,19 @@ class HTTP(BaseHTTPRequestHandler):
         except (Bad,ValueError,TypeError,KeyError,IndexError,AttributeError) as e:self.send({'error':str(e) if isinstance(e,Bad) else 'Requisição inválida.'},status=400)
     def log_message(self,*args):
         super().log_message(*args)
+def smoke_test():
+    # An isolated deterministic setup: no rooms or player data are modified.
+    r=dict(code='TEST',phase='battle',turn=1,score=[0,0],winner=None,log=[],actions=[{'kind':'move','move':'Dança das Espadas'},{'kind':'move','move':'Mente Calma'}],players=[dict(name='A',team=[fighter('Marowak')],active=0),dict(name='B',team=[fighter('Alakazam')],active=0)])
+    a=active(r,0);b=active(r,1);before=pp_for(a)['Dança das Espadas']
+    resolve(r)
+    assert r['turn']==2 and r['phase']=='battle'
+    assert a['st'][0]==2 and b['st'][2]==1 and b['st'][3]==1
+    assert pp_for(a)['Dança das Espadas']==before-1
+    assert len(r['replay']['frames'])>=2 and all('before' in x and 'after' in x for x in r['replay']['frames'])
+    snap=snapshot(r,0);assert 'Dança das Espadas' in snap['legalMoves'] or before==1
+    for name in a['moves']:pp_for(a)[name]=0
+    assert legal_moves(a)==['Debater-se']
+    print('V3 SMOKE TEST OK: PP, stat stages, turn order, replay, snapshot, fallback',flush=True)
 if __name__=='__main__':
+    smoke_test()
     port=int(os.environ.get('PORT',8000));print(f'Arena em http://0.0.0.0:{port}',flush=True);ThreadingHTTPServer(('0.0.0.0',port),HTTP).serve_forever()
