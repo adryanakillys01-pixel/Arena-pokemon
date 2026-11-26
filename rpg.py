@@ -43,6 +43,7 @@ def resolve_end(r,w):
     else:log(r,'Empate!')
 def apply_hit(r,owner,target,move,power=None):
     a,b=r['players'][owner]['p'],r['players'][target]['p'];m=MOVES[move]
+    if a['hp']<=0:return
     if b['hp']<=0 or b['dash']>0 or b['shield']>0:
         if b['hp']>0:log(r,b['name']+' desviou ou bloqueou!')
         return
@@ -132,7 +133,8 @@ def tick(r):
         pr['x']+=pr['vx']*TICK;pr['y']+=pr['vy']*TICK;pr['ttl']-=TICK
         target=1-pr['owner'];b=ps[target]
         if math.hypot(pr['x']-b['x'],pr['y']-b['y'])<39:
-            if b['dash']>0:remain.append(pr)
+            if b['dash']>0:
+                if pr['ttl']>0 and 0<=pr['x']<=W and 0<=pr['y']<=H:remain.append(pr)
             else:apply_hit(r,pr['owner'],target,pr['move'])
         elif pr['ttl']>0 and 0<=pr['x']<=W and 0<=pr['y']<=H:remain.append(pr)
     r['projectiles']=remain
@@ -174,7 +176,8 @@ def handle(d):
             a['seq']=seq
             x,y=d.get('dx',0),d.get('dy',0)
             if type(x) in (int,float) and type(y) in (int,float) and math.isfinite(x) and math.isfinite(y):
-                a['dx'],a['dy']=norm(clamp(x,-1,1),clamp(y,-1,1));a['lastInput']=r['clock']
+                a['lastInput']=r['clock']
+                if a['dash']<=0:a['dx'],a['dy']=norm(clamp(x,-1,1),clamp(y,-1,1))
             if d.get('dash') is True:dodge(a)
             if type(d.get('skill')) is int:skill(r,i,d['skill'])
             if a['hp']<=0 or r['players'][1-i]['p']['hp']<=0:
