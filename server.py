@@ -244,6 +244,62 @@ def resolve(r):
         count=next((k for k in range(min(len(oldlog),len(r['log'])), -1,-1) if oldlog[len(oldlog)-k:]==r['log'][:k]),0)
         if r['log'][count:] or before!=frame_state(r):frame(-1,'residual',None,before,r['log'][count:])
     r['actions']=[None,None]
+# V4: balanced draft and a server-controlled training opponent.
+def balanced_team():
+    pool=[p for p in DEX.values() if p.get('default',True) and not p.get('legendary',False) and 420<=sum(p['stats'])-175<=540 and any(MOVES[n]['cat']!='S' and MOVES[n]['power']>0 for n in p['moves'])]
+    if len(pool)<3:pool=[p for p in DEX.values() if p.get('default',True)]
+    R.shuffle(pool);team=[];types=set()
+    for p in pool:
+        if p['types'][0] not in types:
+            team.append(p['name']);types.add(p['types'][0])
+        if len(team)==3:return team
+    return R.sample([p['name'] for p in pool],3)
+def bot_damage(p,q,n):
+    m=MOVES[n];t=m['type'];c=m['cat']
+    if c=='S':return 0
+    mul=eff(t,q['types'])
+    if n=='Debater-se':mul=1
+    if (q['ability']=='Levitate' and t=='Terra') or (q['ability'] in ('Flash Fire',) and t=='Fogo') or (q['ability'] in ('Water Absorb','Storm Drain','Dry Skin') and t=='Água') or (q['ability'] in ('Volt Absorb','Lightning Rod','Motor Drive') and t=='Elétrico') or (q['ability']=='Sap Sipper' and t=='Planta'):mul=0
+    a=stat(p,1 if c=='F' else 3);b=stat(q,2 if c=='F' else 4)
+    val=(22*m['power']*a/max(1,b)/50+2)*mul*(1.5 if t in p['types'] else 1)*.925*m['acc']/100
+    if c=='F' and p['status']=='Queimado' and p['ability']!='Guts':val*=.5
+    if m['effect']=='twice':val*=2
+    return val
+def bot_action(r):
+    p,q=active(r,1),active(r,0)
+    options=legal_moves(p)
+    def score(n):
+        m=MOVES[n];e=m['effect'];d=bot_damage(p,q,n);v=min(d,q['hp'])
+        if d>=q['hp']:v+=40+(15 if m['priority']>0 else 0)
+        if e in ('heal','roost','rest') and p['hp']<p['stats'][0]*.45:v+=min(p['stats'][0]-p['hp'],p['stats'][0]*.5)*.85
+        if e in ('sleep','para','burn') and not q['status']:v+=20*m['acc']/100
+        if e in ('atk2','calm','dance') and p['hp']>p['stats'][0]*.65 and q['hp']>q['stats'][0]*.5 and max(p['st'])<2:v+=24
+        if e in ('drain','drain75'):v+=min(d*.5,p['stats'][0]-p['hp'])*.5
+        if e.startswith('recoil') or e=='flare':v-=d*.14
+        return v+R.uniform(0,5)
+    best=max(options,key=score)
+    # Switch only if current attacks are ineffective and a healthy reserve has a clear advantage.
+    if switch_allowed(r,1) and p['age']>=1 and bot_damage(p,q,best)<12:
+        choices=[j for j in living(r,1) if j!=r['players'][1]['active']]
+        if choices:
+            def matchup(j):
+                x=r['players'][1]['team'][j]
+                return max((bot_damage(x,q,n) for n in legal_moves(x)),default=0)-max((bot_damage(q,x,n) for n in legal_moves(q)),default=0)*.35
+            j=max(choices,key=matchup)
+            if matchup(j)>25:return dict(kind='switch',target=j)
+    return dict(kind='move',move=best)
+def start_battle(r):
+    r['phase']='battle';log(r,'A batalha começou!')
+    for j in range(2):
+        if active(r,j)['ability']=='Intimidação':stage(r,active(r,1-j),0,-1,active(r,j))
+def bot_step(r):
+    if not r.get('solo'):return
+    if r['phase']=='battle' and r['actions'][0] is not None and r['actions'][1] is None:
+        r['actions'][1]=bot_action(r);resolve(r)
+    if r['phase']=='replace' and not active(r,1)['hp']:
+        candidates=living(r,1)
+        if candidates:enter(r,1,max(candidates,key=lambda j:max((bot_damage(r['players'][1]['team'][j],active(r,0),n) for n in legal_moves(r['players'][1]['team'][j])),default=0)))
+        if all(active(r,j)['hp'] for j in range(2)):r['phase']='battle'
 def switch_allowed(r,i):
     p,q=active(r,i),active(r,1-i);return not(q['ability']=='Shadow Tag' and p['ability']!='Shadow Tag' and 'Fantasma' not in p['types'])
 def snapshot(r,i):
@@ -253,6 +309,7 @@ def snapshot(r,i):
         visible=j==i or r['phase'] not in ('lobby','teams')
         out['players'].append(dict(name=p['name'],team=p['team'] if visible else [],active=p['active'],selected=bool(p['team'])))
     out['replay']=copy.deepcopy(r.get('replay'))
+    out['solo']=bool(r.get('solo'));out['format']=r.get('format','classic')
     if r['players'][i]['team']:
         own=out['players'][i]['team'];
         for p in own:pp_for(p)
@@ -265,35 +322,42 @@ def require(b,msg):
     if not b:raise Bad(msg)
 def handle(d):
     op=d.get('op');code=str(d.get('code','')).upper();token=d.get('token')
-    if op=='create':
+    if op in ('create','solo'):
         name=str(d.get('name','')).strip()[:24];require(name,'Informe seu nome.');code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
         while code in ROOMS:code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
-        token=secrets.token_urlsafe(24);r=dict(code=code,phase='lobby',turn=1,score=[0,0],winner=None,log=[],actions=[None,None],players=[dict(name=name,token=token,team=[],active=0),None]);ROOMS[code]=r;save();return dict(token=token,state=snapshot(r,0))
+        token=secrets.token_urlsafe(24);solo=op=='solo';fmt=d.get('format','classic');require(fmt in ('classic','balanced'),'Formato inválido.')
+        r=dict(code=code,phase='teams' if solo else 'lobby',turn=1,score=[0,0],winner=None,log=[],actions=[None,None],solo=solo,format=fmt,players=[dict(name=name,token=token,team=[],active=0),dict(name='Rival IA',token=secrets.token_urlsafe(24),team=[],active=0) if solo else None])
+        if solo:r['players'][1]['team']=[fighter(n) for n in balanced_team()]
+        ROOMS[code]=r;save();return dict(token=token,state=snapshot(r,0))
     require(code in ROOMS,'Sala não encontrada.');r=ROOMS[code]
     if op=='join':
         require(r['players'][1] is None,'Sala já está cheia.');name=str(d.get('name','')).strip()[:24];require(name,'Informe seu nome.');token=secrets.token_urlsafe(24);r['players'][1]=dict(name=name,token=token,team=[],active=0);r['phase']='teams';save();return dict(token=token,state=snapshot(r,1))
     i=next((j for j,p in enumerate(r['players']) if p and p['token']==token),None);require(i is not None,'Sessão inválida.');p=r['players'][i]
     if op=='state':return dict(state=snapshot(r,i))
-    if op in ('team','random_team'):
-        names=R.sample([n for n,x in DEX.items() if x.get('default',True)],3) if op=='random_team' else d.get('team',[]);require(r['phase']=='teams' and not p['team'],'Não é possível alterar a equipe.');require(isinstance(names,list) and len(names)==3 and all(isinstance(n,str) and n in DEX for n in names) and len(set(names))==3,'Selecione três Pokémon diferentes.');p['team']=[fighter(n) for n in names];p['active']=0
-        if all(x['team'] for x in r['players']):r['phase']='battle';log(r,'A batalha começou!');
-        if r['phase']=='battle':
-            for j in range(2):
-                if active(r,j)['ability']=='Intimidação':stage(r,active(r,1-j),0,-1,active(r,j))
+    if op in ('team','random_team','balanced_team'):
+        names=balanced_team() if op=='balanced_team' or r.get('format')=='balanced' else R.sample([n for n,x in DEX.items() if x.get('default',True)],3) if op=='random_team' else d.get('team',[]);require(r['phase']=='teams' and not p['team'],'Não é possível alterar a equipe.');require(isinstance(names,list) and len(names)==3 and all(isinstance(n,str) and n in DEX for n in names) and len(set(names))==3,'Selecione três Pokémon diferentes.');p['team']=[fighter(n) for n in names];p['active']=0
+        if all(x['team'] for x in r['players']):start_battle(r)
     elif op=='action':
         require(r['phase']=='battle' and d.get('turn')==r['turn'] and r['actions'][i] is None,'Turno desatualizado ou já confirmado.');a=d.get('action',{});kind=a.get('kind')
         if kind=='switch':require(switch_allowed(r,i) and type(a.get('target')) is int and a['target'] in living(r,i) and a['target']!=p['active'],'Troca inválida.')
         else:require(kind=='move' and a.get('move') in legal_moves(active(r,i)),'Golpe inválido.')
         r['actions'][i]=a
         if all(r['actions']):resolve(r)
+        else:bot_step(r)
+    elif op=='cancel_action':
+        require(r['phase']=='battle' and d.get('turn')==r['turn'] and r['actions'][i] is not None and r['actions'][1-i] is None,'O turno já foi resolvido.');r['actions'][i]=None
+    elif op=='forfeit':
+        require(r['phase'] in ('battle','replace'),'Não há batalha em andamento.');r['phase']='end';r['winner']=1-i;r['score'][1-i]+=1;r['actions']=[None,None];log(r,f"{p['name']} desistiu. Vitória de {r['players'][1-i]['name']}!")
     elif op=='replace':
         require(r['phase']=='replace' and not active(r,i)['hp'] and type(d.get('target')) is int and d['target'] in living(r,i),'Substituição inválida.');enter(r,i,d['target']);
         if all(active(r,j)['hp'] for j in range(2)):r['phase']='battle'
+        bot_step(r)
     elif op=='rematch':
         require(r['phase']=='end','Partida ainda em andamento.');r['actions'][i]={'ready':True}
-        if all(r['actions']):
+        if all(r['actions']) or r.get('solo'):
             for x in r['players']:x.update(team=[],active=0)
             r.update(phase='teams',turn=1,winner=None,actions=[None,None],log=[],replay=None)
+            if r.get('solo'):r['players'][1]['team']=[fighter(n) for n in balanced_team()]
     else:raise Bad('Ação desconhecida.')
     save();return dict(state=snapshot(r,i))
 class HTTP(BaseHTTPRequestHandler):
@@ -329,6 +393,19 @@ def smoke_test():
     for name in a['moves']:pp_for(a)[name]=0
     assert legal_moves(a)==['Debater-se']
     print('V3 SMOKE TEST OK: PP, stat stages, turn order, replay, snapshot, fallback',flush=True)
+    team=balanced_team();assert len(team)==3 and len(set(team))==3
+    r=dict(code='BOTTEST',phase='battle',turn=1,score=[0,0],winner=None,log=[],actions=[None,None],solo=True,players=[dict(name='A',team=[fighter('Marowak'),fighter('Pikachu'),fighter('Psyduck')],active=0),dict(name='B',team=[fighter(n) for n in team],active=0)])
+    for _ in range(160):
+        if r['phase']=='end':break
+        if r['phase']=='replace':
+            if not active(r,0)['hp']:enter(r,0,living(r,0)[0])
+            bot_step(r)
+            if all(active(r,j)['hp'] for j in range(2)):r['phase']='battle'
+        if r['phase']=='battle':
+            p=active(r,0);q=active(r,1);n=max(legal_moves(p),key=lambda n:bot_damage(p,q,n))
+            r['actions'][0]=dict(kind='move',move=n);bot_step(r)
+    assert r['phase']=='end' and sum(r['score']) in (0,1)
+    print('V4 SMOKE TEST OK: balanced draft, solo opponent, full battle',flush=True)
 if __name__=='__main__':
     smoke_test()
     port=int(os.environ.get('PORT',8000));print(f'Arena em http://0.0.0.0:{port}',flush=True);ThreadingHTTPServer(('0.0.0.0',port),HTTP).serve_forever()
