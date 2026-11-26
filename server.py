@@ -360,6 +360,8 @@ def handle(d):
             if r.get('solo'):r['players'][1]['team']=[fighter(n) for n in balanced_team()]
     else:raise Bad('Ação desconhecida.')
     save();return dict(state=snapshot(r,i))
+import rpg
+rpg.configure(DEX,MOVES,eff)
 class HTTP(BaseHTTPRequestHandler):
     def send(self,b,typ='application/json',status=200):
         if not isinstance(b,bytes):b=json.dumps(b,ensure_ascii=False).encode()
@@ -368,14 +370,15 @@ class HTTP(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlsplit(self.path).path.rstrip('/') or '/'
         if path in ('/', '/index.html'):self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
+        elif path in ('/rpg','/rpg.html'):self.send((ROOT/'rpg.html').read_bytes(),'text/html; charset=utf-8')
         elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES,speciesCount=SPECIES_COUNT))
         elif path=='/favicon.ico':self.send(b'', 'image/x-icon', 204)
         else:self.send({'error':'Não encontrado'},status=404)
     def do_HEAD(self):self.do_GET()
     def do_POST(self):
         try:
-            require(urlsplit(self.path).path.rstrip('/')=='/api','Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
-            with LOCK:out=handle(d)
+            path=urlsplit(self.path).path.rstrip('/');require(path in ('/api','/rpg-api'),'Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
+            with LOCK:out=rpg.handle(d) if path=='/rpg-api' else handle(d)
             self.send(out)
         except (Bad,ValueError,TypeError,KeyError,IndexError,AttributeError) as e:self.send({'error':str(e) if isinstance(e,Bad) else 'Requisição inválida.'},status=400)
     def log_message(self,*args):
@@ -408,4 +411,5 @@ def smoke_test():
     print('V4 SMOKE TEST OK: balanced draft, solo opponent, full battle',flush=True)
 if __name__=='__main__':
     smoke_test()
+    rpg.smoke_test()
     port=int(os.environ.get('PORT',8000));print(f'Arena em http://0.0.0.0:{port}',flush=True);ThreadingHTTPServer(('0.0.0.0',port),HTTP).serve_forever()
