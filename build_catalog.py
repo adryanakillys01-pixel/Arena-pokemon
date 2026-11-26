@@ -91,6 +91,7 @@ def main():
         mid=int(r['move_id'])
         if mid in supported:learn[int(r['pokemon_id'])].add(mid)
     catalog={};default_ids=set()
+    base_ids={int(r['species_id']):int(r['id']) for r in rows(data,'pokemon') if r['is_default']=='1'}
     for r in rows(data,'pokemon'):
         pid=int(r['id']);sid=int(r['species_id']);sp=species.get(sid);st=stats[pid];tp=[v for _,v in sorted(types[pid].items())]
         if not sp or len(st)<6 or not tp or any(v is None for v in tp):continue
@@ -98,7 +99,7 @@ def main():
         # Keep every species and data-backed alternative form, including regional and Mega variants.
         if name in catalog:name+=' (#'+str(pid)+')'
         preferred='F' if st[2]>=st[4] else 'E'
-        candidates=[supported[mid] for mid in sorted(learn[pid])]
+        candidates=[supported[mid] for mid in sorted(learn[pid] or learn[base_ids.get(sid,pid)])]
         attacks=[v for v in candidates if v[2]!='S' and v[3]>0]
         def rank(v):return (min(v[3],120)*(1.3 if v[1] in tp else 1)*(1.15 if v[2]==preferred else 1),v[0])
         attacks.sort(key=rank,reverse=True);chosen=[];covered=set()
@@ -110,7 +111,7 @@ def main():
         if statuses and len(chosen)<4:chosen.append(statuses[0][0])
         for v in attacks+statuses+candidates:
             if v[0] not in chosen and len(chosen)<4:chosen.append(v[0])
-        if not any(v[0] in chosen for v in attacks) and 'Transformação' not in chosen:chosen.append('Debater-se')
+        if not any(v[0] in chosen for v in attacks):chosen.append('Debater-se')
         if not chosen:chosen=['Debater-se']
         # Pokémon with limited legal moves may have fewer than four, rather than invent moves.
         ab=abilities[pid];ability=ab[min(ab)] if ab else ''
