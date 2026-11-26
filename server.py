@@ -318,7 +318,7 @@ class HTTP(BaseHTTPRequestHandler):
         super().log_message(*args)
 def smoke_test():
     # An isolated deterministic setup: no rooms or player data are modified.
-    r=dict(code='TEST',phase='battle',turn=1,score=[0,0],winner=None,log=[],actions=[{'kind':'move','move':'Dança das Espadas'},{'kind':'move','move':'Mente Calma'}],players=[dict(name='A',team=[fighter('Marowak')],active=0),dict(name='B',team=[fighter('Alakazam')],active=0)])
+    r=dict(code='TEST',phase='battle',turn=1,score=[0,0],winner=None,log=[],actions=[{'kind':'move','move':'Dança das Espadas'},{'kind':'move','move':'Mente Calma'}],players=[dict(name='A',team=[fighter('Marowak')],active=0),dict(name='B',team=[fighter('Psyduck')],active=0)])
     a=active(r,0);b=active(r,1);before=pp_for(a)['Dança das Espadas']
     resolve(r)
     assert r['turn']==2 and r['phase']=='battle'
