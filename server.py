@@ -1,5 +1,6 @@
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import urlsplit
 import json, secrets, random, threading, os, time, copy
 ROOT=Path(__file__).parent
 # name, dex id, types, official base stats (HP,A,D,SA,SD,Spe), ability, moves
@@ -220,15 +221,18 @@ class HTTP(BaseHTTPRequestHandler):
         if not isinstance(b,bytes):b=json.dumps(b,ensure_ascii=False).encode()
         self.send_response(status);self.send_header('Content-Type',typ);self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
     def do_GET(self):
-        if self.path=='/':self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
-        elif self.path=='/dex':self.send(dict(dex=DEX,moves=MOVES))
+        path=urlsplit(self.path).path.rstrip('/') or '/'
+        if path in ('/', '/index.html'):self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
+        elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES))
+        elif path=='/favicon.ico':self.send(b'', 'image/x-icon', 204)
         else:self.send({'error':'Não encontrado'},status=404)
     def do_POST(self):
         try:
-            require(self.path=='/api','Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
+            require(urlsplit(self.path).path.rstrip('/')=='/api','Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
             with LOCK:out=handle(d)
             self.send(out)
         except (Bad,ValueError,TypeError,KeyError,IndexError,AttributeError) as e:self.send({'error':str(e) if isinstance(e,Bad) else 'Requisição inválida.'},status=400)
-    def log_message(self,*args):pass
+    def log_message(self,*args):
+        super().log_message(*args)
 if __name__=='__main__':
     port=int(os.environ.get('PORT',8000));print(f'Arena em http://0.0.0.0:{port}',flush=True);ThreadingHTTPServer(('0.0.0.0',port),HTTP).serve_forever()
