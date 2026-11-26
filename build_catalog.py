@@ -74,18 +74,18 @@ def main():
     for r in rows(data,'pokemon_abilities'):
         if r['is_hidden']=='0':abilities[int(r['pokemon_id'])][int(r['slot'])]=ability_names.get(int(r['ability_id']),'')
     move_names={int(r['move_id']):r['name'] for r in rows(data,'move_names') if r['local_language_id']=='9'}
-    supported={};definitions={}
+    supported={};definitions={};move_pp={}
     for r in rows(data,'moves'):
         mid=int(r['id']);key=r['identifier'];tp=TYPE.get(int(r['type_id']));cat={'1':'S','2':'F','3':'E'}.get(r['damage_class_id'])
         if not tp or not cat:continue
         if key in NAMES:
-            supported[mid]=(NAMES[key],tp,cat,int(r['power'] or 0));continue
+            move_pp[NAMES[key]]=max(1,int(r['pp'] or 10));supported[mid]=(NAMES[key],tp,cat,int(r['power'] or 0));continue
         if key not in EXTRA or key in EXCLUDE:continue
         name,effect=EXTRA[key];power=int(r['power'] or 0)
         if cat!='S' and power<=0:continue
         if cat=='S' and effect not in ('transform','splash','def1','protect'):continue
         definitions[name]=dict(type=tp,cat=cat,power=power,acc=int(r['accuracy'] or 100),effect=effect,priority=int(r['priority'] or 0))
-        supported[mid]=(name,tp,cat,power)
+        move_pp[name]=max(1,int(r['pp'] or 10));supported[mid]=(name,tp,cat,power)
     learn=defaultdict(set)
     for r in rows(data,'pokemon_moves'):
         mid=int(r['move_id'])
@@ -119,7 +119,7 @@ def main():
         if default:default_ids.add(sid)
     definitions.setdefault('Debater-se',dict(type='Normal',cat='F',power=50,acc=100,effect='recoil4',priority=0))
     if len(default_ids)!=len(species) or len(default_ids)<1000:raise RuntimeError(f'Incomplete species catalog: {len(default_ids)}/{len(species)}')
-    out={'dex':catalog,'moves':definitions,'speciesCount':len(default_ids),'formsCount':len(catalog)}
+    out={'dex':catalog,'moves':definitions,'movePP':move_pp,'speciesCount':len(default_ids),'formsCount':len(catalog)}
     (ROOT/'catalog.json').write_text(json.dumps(out,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
     print(f'CATALOG OK: {len(default_ids)} species; {len(catalog)} playable entries; {len(definitions)} extra moves',flush=True)
 if __name__=='__main__':main()
