@@ -365,24 +365,25 @@ import math
 rpg.configure(DEX,MOVES,eff)
 # Expedition sessions only synchronize presence; exploration and saves are local.
 EXP_ROOMS={}
+WORLD_ROOMS={}
 EXP_IDS={p['id'] for p in DEX.values()}
-def expedition(d):
+def expedition(d,rooms=EXP_ROOMS):
     now=time.monotonic()
-    for k in list(EXP_ROOMS):
-        room=EXP_ROOMS[k]
-        if now-room['touched']>900:del EXP_ROOMS[k]
+    for k in list(rooms):
+        room=rooms[k]
+        if now-room['touched']>900:del rooms[k]
     op=d.get('op')
     if op in ('create','join'):
         name=str(d.get('name','')).strip()[:24];require(name,'Informe seu nome.')
         token=secrets.token_urlsafe(24)
         if op=='create':
-            require(len(EXP_ROOMS)<300,'Servidor cheio.')
+            require(len(rooms)<300,'Servidor cheio.')
             code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
-            while code in EXP_ROOMS:code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
-            EXP_ROOMS[code]=dict(touched=now,players={})
+            while code in rooms:code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
+            rooms[code]=dict(touched=now,players={})
         else:
-            code=str(d.get('code','')).strip().upper();require(code in EXP_ROOMS,'Sala não encontrada.')
-        room=EXP_ROOMS[code]
+            code=str(d.get('code','')).strip().upper();require(code in rooms,'Sala não encontrada.')
+        room=rooms[code]
         for k in list(room['players']):
             if now-room['players'][k]['seen']>90:del room['players'][k]
         require(len(room['players'])<2,'Sala cheia.')
@@ -390,11 +391,11 @@ def expedition(d):
         room['touched']=now
         return dict(code=code,token=token)
     code=str(d.get('code','')).strip().upper();token=d.get('token')
-    require(code in EXP_ROOMS,'Sala não encontrada.')
-    room=EXP_ROOMS[code];require(isinstance(token,str) and token in room['players'],'Sessão inválida.')
+    require(code in rooms,'Sala não encontrada.')
+    room=rooms[code];require(isinstance(token,str) and token in room['players'],'Sessão inválida.')
     if op=='leave':
         del room['players'][token]
-        if not room['players']:del EXP_ROOMS[code]
+        if not room['players']:del rooms[code]
         return dict(ok=True)
     require(op=='sync','Ação inválida.')
     p=room['players'][token];x,y,pid=d.get('x'),d.get('y'),d.get('id')
@@ -420,6 +421,8 @@ class HTTP(BaseHTTPRequestHandler):
         if path in ('/', '/index.html'):self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
         elif path in ('/rpg','/rpg.html'):self.send((ROOT/'rpg.html').read_bytes(),'text/html; charset=utf-8')
         elif path in ('/expedition','/expedition.html'):self.send((ROOT/'expedition.html').read_bytes(),'text/html; charset=utf-8')
+        elif path in ('/world','/world.html'):self.send((ROOT/'world.html').read_bytes(),'text/html; charset=utf-8')
+        elif path=='/world.js':self.send((ROOT/'world.js').read_bytes(),'application/javascript; charset=utf-8')
         elif path=='/expedition.js':self.send((ROOT/'expedition.js').read_bytes(),'application/javascript; charset=utf-8')
         elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES,speciesCount=SPECIES_COUNT))
         elif path=='/favicon.ico':self.send(b'', 'image/x-icon', 204)
@@ -427,12 +430,12 @@ class HTTP(BaseHTTPRequestHandler):
     def do_HEAD(self):self.do_GET()
     def do_POST(self):
         try:
-            path=urlsplit(self.path).path.rstrip('/');require(path in ('/api','/rpg-api','/expedition-api'),'Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
-            with LOCK:out=expedition(d) if path=='/expedition-api' else rpg.handle(d) if path=='/rpg-api' else handle(d)
+            path=urlsplit(self.path).path.rstrip('/');require(path in ('/api','/rpg-api','/expedition-api','/world-api'),'Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
+            with LOCK:out=expedition(d,WORLD_ROOMS) if path=='/world-api' else expedition(d) if path=='/expedition-api' else rpg.handle(d) if path=='/rpg-api' else handle(d)
             self.send(out)
         except (Bad,ValueError,TypeError,KeyError,IndexError,AttributeError) as e:self.send({'error':str(e) if isinstance(e,Bad) or (path=='/rpg-api' and isinstance(e,ValueError)) else 'Requisição inválida.'},status=400)
     def log_message(self,*args):
-        if self.path.startswith(('/rpg-api','/expedition-api')) and len(args)>=2 and str(args[1])=='200':return
+        if self.path.startswith(('/rpg-api','/expedition-api','/world-api')) and len(args)>=2 and str(args[1])=='200':return
         super().log_message(*args)
 def smoke_test():
     # An isolated deterministic setup: no rooms or player data are modified.
