@@ -361,7 +361,55 @@ def handle(d):
     else:raise Bad('Ação desconhecida.')
     save();return dict(state=snapshot(r,i))
 import rpg
+import math
 rpg.configure(DEX,MOVES,eff)
+# Expedition sessions only synchronize presence; exploration and saves are local.
+EXP_ROOMS={}
+EXP_IDS={p['id'] for p in DEX.values()}
+def expedition(d):
+    now=time.monotonic()
+    for k in list(EXP_ROOMS):
+        room=EXP_ROOMS[k]
+        if now-room['touched']>900:del EXP_ROOMS[k]
+    op=d.get('op')
+    if op in ('create','join'):
+        name=str(d.get('name','')).strip()[:24];require(name,'Informe seu nome.')
+        token=secrets.token_urlsafe(24)
+        if op=='create':
+            require(len(EXP_ROOMS)<300,'Servidor cheio.')
+            code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
+            while code in EXP_ROOMS:code=''.join(R.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
+            EXP_ROOMS[code]=dict(touched=now,players={})
+        else:
+            code=str(d.get('code','')).strip().upper();require(code in EXP_ROOMS,'Sala não encontrada.')
+        room=EXP_ROOMS[code]
+        for k in list(room['players']):
+            if now-room['players'][k]['seen']>90:del room['players'][k]
+        require(len(room['players'])<2,'Sala cheia.')
+        room['players'][token]=dict(name=name,x=300,y=330,id=25,seen=now)
+        room['touched']=now
+        return dict(code=code,token=token)
+    code=str(d.get('code','')).strip().upper();token=d.get('token')
+    require(code in EXP_ROOMS,'Sala não encontrada.')
+    room=EXP_ROOMS[code];require(isinstance(token,str) and token in room['players'],'Sessão inválida.')
+    if op=='leave':
+        del room['players'][token]
+        if not room['players']:del EXP_ROOMS[code]
+        return dict(ok=True)
+    require(op=='sync','Ação inválida.')
+    p=room['players'][token];x,y,pid=d.get('x'),d.get('y'),d.get('id')
+    require(type(x) in (int,float) and type(y) in (int,float) and math.isfinite(x) and math.isfinite(y) and type(pid) is int and pid in EXP_IDS,'Posição inválida.')
+    p.update(x=max(35,min(1885,x)),y=max(35,min(1205,y)),id=pid,seen=now);room['touched']=now
+    other=next((q for k,q in room['players'].items() if k!=token and now-q['seen']<4),None)
+    return dict(friend={k:other[k] for k in ('name','x','y','id')} if other else None)
+def expedition_smoke_test():
+    a=expedition(dict(op='create',name='A'));b=expedition(dict(op='join',name='B',code=a['code']))
+    x=expedition(dict(op='sync',**a,x=400,y=250,id=25))
+    assert x['friend']['name']=='B'
+    x=expedition(dict(op='sync',**b,x=450,y=220,id=4))
+    assert x['friend']['x']==400 and 'token' not in x['friend']
+    expedition(dict(op='leave',**b));assert expedition(dict(op='sync',**a,x=400,y=250,id=25))['friend'] is None
+    expedition(dict(op='leave',**a));print('EXPEDITION PRESENCE TEST OK',flush=True)
 class HTTP(BaseHTTPRequestHandler):
     def send(self,b,typ='application/json',status=200):
         if not isinstance(b,bytes):b=json.dumps(b,ensure_ascii=False).encode()
@@ -371,17 +419,20 @@ class HTTP(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path.rstrip('/') or '/'
         if path in ('/', '/index.html'):self.send((ROOT/'index.html').read_bytes(),'text/html; charset=utf-8')
         elif path in ('/rpg','/rpg.html'):self.send((ROOT/'rpg.html').read_bytes(),'text/html; charset=utf-8')
+        elif path in ('/expedition','/expedition.html'):self.send((ROOT/'expedition.html').read_bytes(),'text/html; charset=utf-8')
+        elif path=='/expedition.js':self.send((ROOT/'expedition.js').read_bytes(),'application/javascript; charset=utf-8')
         elif path=='/dex':self.send(dict(dex=DEX,moves=MOVES,speciesCount=SPECIES_COUNT))
         elif path=='/favicon.ico':self.send(b'', 'image/x-icon', 204)
         else:self.send({'error':'Não encontrado'},status=404)
     def do_HEAD(self):self.do_GET()
     def do_POST(self):
         try:
-            path=urlsplit(self.path).path.rstrip('/');require(path in ('/api','/rpg-api'),'Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
-            with LOCK:out=rpg.handle(d) if path=='/rpg-api' else handle(d)
+            path=urlsplit(self.path).path.rstrip('/');require(path in ('/api','/rpg-api','/expedition-api'),'Não encontrado.');n=int(self.headers.get('Content-Length','0'));require(0<n<16000,'Requisição inválida.');d=json.loads(self.rfile.read(n));require(isinstance(d,dict),'Requisição inválida.')
+            with LOCK:out=expedition(d) if path=='/expedition-api' else rpg.handle(d) if path=='/rpg-api' else handle(d)
             self.send(out)
-        except (Bad,ValueError,TypeError,KeyError,IndexError,AttributeError) as e:self.send({'error':str(e) if isinstance(e,Bad) else 'Requisição inválida.'},status=400)
+        except (Bad,ValueError,TypeError,KeyError,IndexError,AttributeError) as e:self.send({'error':str(e) if isinstance(e,Bad) or (path=='/rpg-api' and isinstance(e,ValueError)) else 'Requisição inválida.'},status=400)
     def log_message(self,*args):
+        if self.path.startswith(('/rpg-api','/expedition-api')) and len(args)>=2 and str(args[1])=='200':return
         super().log_message(*args)
 def smoke_test():
     # An isolated deterministic setup: no rooms or player data are modified.
@@ -412,4 +463,5 @@ def smoke_test():
 if __name__=='__main__':
     smoke_test()
     rpg.smoke_test()
+    expedition_smoke_test()
     port=int(os.environ.get('PORT',8000));print(f'Arena em http://0.0.0.0:{port}',flush=True);ThreadingHTTPServer(('0.0.0.0',port),HTTP).serve_forever()
